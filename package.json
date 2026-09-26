@@ -33,7 +33,8 @@
     "lint": "tsc --noEmit",
     "example:codegen": "node ./bin/cli.js codegen -c \"examples/basic/src/controllers/*.ts\" -m \"examples/basic/src/models/*.ts\" -r examples/basic/src/routes.generated.ts -o examples/basic/src/openapi.json --title \"Todo API\"",
     "example:test": "tsx --tsconfig examples/basic/tsconfig.json examples/basic/run-test.ts",
-    "test:geastack": "geatsc coverage examples/basic/src/routes.generated.ts --project tests/tsconfig.geastack.json --no-derived --no-boxed"
+    "test:geastack": "geatsc coverage examples/basic/src/routes.generated.ts --project tests/tsconfig.geastack.json --no-derived --no-boxed && geatsc coverage tests/geastack-probe.ts --project tests/tsconfig.geastack.json --no-derived --no-boxed",
+    "test:geastack:probe": "geatsc coverage tests/geastack-probe.ts --project tests/tsconfig.geastack.json --no-derived --no-boxed"
   },
   "keywords": [
     "geastack",

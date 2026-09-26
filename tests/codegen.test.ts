@@ -6,6 +6,7 @@ import { CodeGenerator } from '../src/cli/generator.js';
 
 describe('AOT Codegen & AST Parser', () => {
   const fixturePath = path.resolve(__dirname, 'fixtures/user.controller.ts');
+  const advancedFixturePath = path.resolve(__dirname, 'fixtures/advanced.controller.ts');
 
   // Create temporary fixture
   fs.mkdirSync(path.dirname(fixturePath), { recursive: true });
@@ -43,6 +44,98 @@ export class UserController {
   @Get('/search')
   search(@Query('q') query: string, @Header('x-api-key') apiKey: string) {
     return { query, apiKey, results: [] };
+  }
+}
+`,
+    'utf8'
+  );
+
+  // Advanced decorators fixture
+  fs.writeFileSync(
+    advancedFixturePath,
+    `
+import {
+  Controller,
+  Get,
+  Post,
+  Options,
+  Head,
+  All,
+  Param,
+  Cookie,
+  Queries,
+  Headers,
+  Params,
+  Req,
+  Res,
+  HttpCode,
+  Redirect,
+  Use,
+  ApiBearerAuth,
+  ApiConsumes,
+  ApiProduces,
+  ApiParam,
+  ApiQuery,
+  ApiHeader,
+  ApiBody,
+  ApiOkResponse,
+  ApiNoContentResponse,
+  ApiNotFoundResponse,
+  ApiExcludeEndpoint,
+  ApiProperty,
+  ApiHideProperty,
+} from '../../src/index.js';
+
+export class AdvancedDto {
+  @ApiProperty({ description: 'Public field', example: 'visible' })
+  visible: string;
+
+  @ApiHideProperty()
+  secret: string;
+}
+
+@ApiBearerAuth('bearer')
+@Use(authMiddleware)
+@Controller('/advanced')
+export class AdvancedController {
+  @HttpCode(204)
+  @ApiNoContentResponse({ description: 'Deleted or empty' })
+  @Options('/options')
+  options() {
+    return null;
+  }
+
+  @Head('/ping')
+  ping() {
+    return null;
+  }
+
+  @All('/any')
+  handleAny(@Req() req: any, @Res() res: any) {
+    return { ok: true };
+  }
+
+  @Redirect('/new-home', 301)
+  @Get('/old-path')
+  oldPath() {}
+
+  @ApiConsumes('multipart/form-data')
+  @ApiProduces('text/plain')
+  @ApiBody({ description: 'Upload file', mediaType: 'multipart/form-data' })
+  @Post('/upload')
+  upload(
+    @Cookie('session_id') sessionId: string,
+    @Queries() queryParams: any,
+    @Headers() allHeaders: any,
+    @Params() allParams: any
+  ) {
+    return 'uploaded';
+  }
+
+  @ApiExcludeEndpoint()
+  @Get('/hidden')
+  hiddenRoute() {
+    return 'hidden';
   }
 }
 `,
@@ -141,5 +234,64 @@ export class UserController {
     // Schema check
     expect(spec.components?.schemas?.CreateUserDto).toBeDefined();
     expect(spec.components?.schemas?.CreateUserDto.properties?.name.description).toBe('User display name');
+  });
+
+  it('should parse and generate all advanced decorators (Options, Head, All, Cookie, Req, Res, Use, HttpCode, Redirect, OpenAPI Security & Exclude)', () => {
+    const parser = new AstParser();
+    const parsed = parser.parseFiles([advancedFixturePath]);
+
+    expect(parsed.controllers).toHaveLength(1);
+    const controller = parsed.controllers[0];
+    expect(controller.className).toBe('AdvancedController');
+    expect(controller.security).toEqual([{ bearer: [] }]);
+    expect(controller.middlewares).toContain('authMiddleware');
+
+    // Check methods
+    expect(controller.methods.find((m) => m.httpMethod === 'options')).toBeDefined();
+    expect(controller.methods.find((m) => m.httpMethod === 'head')).toBeDefined();
+    expect(controller.methods.find((m) => m.httpMethod === 'all')).toBeDefined();
+
+    const uploadMethod = controller.methods.find((m) => m.methodName === 'upload');
+    expect(uploadMethod).toBeDefined();
+    expect(uploadMethod?.consumes).toContain('multipart/form-data');
+    expect(uploadMethod?.produces).toContain('text/plain');
+    expect(uploadMethod?.params.some((p) => p.source === 'cookie')).toBe(true);
+    expect(uploadMethod?.params.some((p) => p.source === 'queries')).toBe(true);
+    expect(uploadMethod?.params.some((p) => p.source === 'headers')).toBe(true);
+    expect(uploadMethod?.params.some((p) => p.source === 'params')).toBe(true);
+
+    const redirectMethod = controller.methods.find((m) => m.methodName === 'oldPath');
+    expect(redirectMethod?.redirect?.url).toBe('/new-home');
+    expect(redirectMethod?.redirect?.status).toBe(301);
+
+    const hiddenMethod = controller.methods.find((m) => m.methodName === 'hiddenRoute');
+    expect(hiddenMethod?.exclude).toBe(true);
+
+    // Verify Model with ApiHideProperty
+    expect(parsed.models).toHaveLength(1);
+    const model = parsed.models[0];
+    expect(model.className).toBe('AdvancedDto');
+    expect(model.properties.find((p) => p.name === 'visible')).toBeDefined();
+    expect(model.properties.find((p) => p.name === 'secret')).toBeUndefined(); // Hidden!
+
+    // Generate Routes
+    const generator = new CodeGenerator(parsed);
+    const routes = generator.generateHonoRoutes('src/routes.generated.ts');
+
+    expect(routes).toContain("app.options('/advanced/options', authMiddleware,");
+    expect(routes).toContain("app.on('HEAD', '/advanced/ping', authMiddleware,");
+    expect(routes).toContain("app.all('/advanced/any', authMiddleware,");
+    expect(routes).toContain("return c.redirect('/new-home', 301);");
+    expect(routes).toContain("c.req.header('cookie')");
+    expect(routes).toContain("c.req.query()");
+    expect(routes).toContain("c.req.header()");
+    expect(routes).toContain("c.req.param()");
+
+    // Generate OpenAPI
+    const spec = generator.generateOpenApiSpec('Advanced API', '1.0.0');
+    expect(spec.components?.securitySchemes?.bearer).toBeDefined();
+    expect(spec.paths['/advanced/upload'].post.security).toBeDefined();
+    expect(spec.paths['/advanced/upload'].post.requestBody.content['multipart/form-data']).toBeDefined();
+    expect(spec.paths['/advanced/hidden']).toBeUndefined(); // Excluded!
   });
 });

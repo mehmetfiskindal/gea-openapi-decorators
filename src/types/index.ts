@@ -1,6 +1,17 @@
-export type HttpMethod = 'get' | 'post' | 'put' | 'patch' | 'delete';
+export type HttpMethod = 'get' | 'post' | 'put' | 'patch' | 'delete' | 'options' | 'head' | 'all';
 
-export type ParamSource = 'param' | 'query' | 'body' | 'header' | 'context';
+export type ParamSource =
+  | 'param'
+  | 'query'
+  | 'body'
+  | 'header'
+  | 'context'
+  | 'req'
+  | 'res'
+  | 'cookie'
+  | 'queries'
+  | 'headers'
+  | 'params';
 
 export interface ParamInfo {
   source: ParamSource;
@@ -9,6 +20,50 @@ export interface ParamInfo {
   paramName: string;
   type: string;
   required: boolean;
+}
+
+export interface ApiParamInfo {
+  name: string;
+  description?: string;
+  required?: boolean;
+  type?: string;
+  example?: any;
+}
+
+export interface ApiQueryInfo {
+  name: string;
+  description?: string;
+  required?: boolean;
+  type?: string;
+  example?: any;
+}
+
+export interface ApiHeaderInfo {
+  name: string;
+  description?: string;
+  required?: boolean;
+  type?: string;
+  example?: any;
+}
+
+export interface ApiBodyInfo {
+  description?: string;
+  required?: boolean;
+  type?: string;
+  mediaType?: string;
+}
+
+export interface ApiResponseInfo {
+  status: number;
+  description?: string;
+  type?: any;
+}
+
+export type ApiSecurityRequirement = Record<string, string[]>;
+
+export interface RedirectInfo {
+  url: string;
+  status?: number;
 }
 
 export interface RouteMethodInfo {
@@ -23,6 +78,18 @@ export interface RouteMethodInfo {
   tags?: string[];
   statusCode?: number;
   deprecated?: boolean;
+  middlewares?: string[];
+  httpCode?: number;
+  redirect?: RedirectInfo;
+  security?: ApiSecurityRequirement[];
+  consumes?: string[];
+  produces?: string[];
+  apiParams?: ApiParamInfo[];
+  apiQueries?: ApiQueryInfo[];
+  apiHeaders?: ApiHeaderInfo[];
+  apiBody?: ApiBodyInfo;
+  responses?: ApiResponseInfo[];
+  exclude?: boolean;
 }
 
 export interface ControllerInfo {
@@ -31,6 +98,10 @@ export interface ControllerInfo {
   basePath: string;
   tags: string[];
   methods: RouteMethodInfo[];
+  security?: ApiSecurityRequirement[];
+  middlewares?: string[];
+  exclude?: boolean;
+  extraModels?: string[];
 }
 
 export interface PropertySchemaInfo {
@@ -40,6 +111,7 @@ export interface PropertySchemaInfo {
   description?: string;
   example?: any;
   enum?: (string | number)[];
+  hide?: boolean;
 }
 
 export interface ModelSchemaInfo {
@@ -87,4 +159,5 @@ export interface OpenApiDocument {
     securitySchemes?: Record<string, any>;
   };
   tags?: { name: string; description?: string }[];
+  security?: ApiSecurityRequirement[];
 }

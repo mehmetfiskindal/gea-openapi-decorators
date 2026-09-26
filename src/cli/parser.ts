@@ -9,6 +9,13 @@ import type {
   PropertySchemaInfo,
   ParsedProject,
   HttpMethod,
+  ApiSecurityRequirement,
+  ApiParamInfo,
+  ApiQueryInfo,
+  ApiHeaderInfo,
+  ApiBodyInfo,
+  ApiResponseInfo,
+  RedirectInfo,
 } from '../types/index.js';
 
 export class AstParser {
@@ -37,7 +44,8 @@ export class AstParser {
       if (!fs.existsSync(resolvedPath)) continue;
 
       const sourceText = fs.readFileSync(resolvedPath, 'utf8');
-      const sourceFile = this.program?.getSourceFile(resolvedPath) ||
+      const sourceFile =
+        this.program?.getSourceFile(resolvedPath) ||
         ts.createSourceFile(resolvedPath, sourceText, ts.ScriptTarget.Latest, true);
 
       this.visitNode(sourceFile, sourceFile, resolvedPath, controllers, models);
@@ -60,6 +68,10 @@ export class AstParser {
       if (controllerMeta) {
         const methods = this.extractRouteMethods(node, sourceFile);
         const tags = this.extractClassTags(node);
+        const security = this.extractClassSecurity(node);
+        const middlewares = this.extractClassMiddlewares(node, sourceFile);
+        const exclude = this.extractClassExclude(node);
+        const extraModels = this.extractClassExtraModels(node);
 
         controllers.push({
           className,
@@ -67,6 +79,10 @@ export class AstParser {
           basePath: controllerMeta.basePath,
           tags,
           methods,
+          security: security.length > 0 ? security : undefined,
+          middlewares: middlewares.length > 0 ? middlewares : undefined,
+          exclude,
+          extraModels: extraModels.length > 0 ? extraModels : undefined,
         });
       }
 
@@ -124,6 +140,69 @@ export class AstParser {
     return tags;
   }
 
+  private extractClassSecurity(node: ts.ClassDeclaration): ApiSecurityRequirement[] {
+    const security: ApiSecurityRequirement[] = [];
+    const decorators = this.getDecorators(node);
+    for (const d of decorators) {
+      const parsed = this.parseSecurityDecorator(d);
+      if (parsed) {
+        security.push(parsed);
+      }
+    }
+    return security;
+  }
+
+  private extractClassMiddlewares(node: ts.ClassDeclaration, sourceFile: ts.SourceFile): string[] {
+    const middlewares: string[] = [];
+    const decorators = this.getDecorators(node);
+    for (const d of decorators) {
+      if (ts.isCallExpression(d.expression)) {
+        const expr = d.expression.expression;
+        if (ts.isIdentifier(expr) && (expr.text === 'Use' || expr.text === 'UseMiddleware')) {
+          for (const arg of d.expression.arguments) {
+            middlewares.push(arg.getText(sourceFile));
+          }
+        }
+      }
+    }
+    return middlewares;
+  }
+
+  private extractClassExclude(node: ts.ClassDeclaration): boolean {
+    const decorators = this.getDecorators(node);
+    for (const d of decorators) {
+      if (ts.isCallExpression(d.expression)) {
+        const expr = d.expression.expression;
+        if (ts.isIdentifier(expr) && expr.text === 'ApiExcludeController') {
+          const arg = d.expression.arguments[0];
+          if (arg && arg.kind === ts.SyntaxKind.FalseKeyword) {
+            return false;
+          }
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  private extractClassExtraModels(node: ts.ClassDeclaration): string[] {
+    const models: string[] = [];
+    const decorators = this.getDecorators(node);
+    for (const d of decorators) {
+      if (ts.isCallExpression(d.expression)) {
+        const expr = d.expression.expression;
+        if (ts.isIdentifier(expr) && expr.text === 'ApiExtraModels') {
+          for (const arg of d.expression.arguments) {
+            if (ts.isIdentifier(arg)) {
+              models.push(arg.text);
+            }
+          }
+        }
+      }
+    }
+    return models;
+  }
+
   private extractRouteMethods(
     node: ts.ClassDeclaration,
     sourceFile: ts.SourceFile
@@ -138,12 +217,19 @@ export class AstParser {
         if (routeMeta) {
           const params = this.extractMethodParameters(member, sourceFile);
           const openApiMeta = this.extractMethodOpenApi(member, sourceFile);
-          const isAsync = member.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword) ?? false;
+          const flowMeta = this.extractMethodFlow(member, sourceFile);
+          const isAsync =
+            member.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword) ?? false;
 
           let returnType: string | undefined;
           if (member.type) {
             returnType = member.type.getText(sourceFile);
           }
+
+          const defaultStatus =
+            flowMeta.httpCode ??
+            openApiMeta.statusCode ??
+            (routeMeta.httpMethod === 'post' ? 201 : 200);
 
           methods.push({
             methodName,
@@ -155,8 +241,20 @@ export class AstParser {
             summary: openApiMeta.summary,
             description: openApiMeta.description,
             tags: openApiMeta.tags,
-            statusCode: openApiMeta.statusCode ?? (routeMeta.httpMethod === 'post' ? 201 : 200),
+            statusCode: defaultStatus,
             deprecated: openApiMeta.deprecated,
+            middlewares: flowMeta.middlewares.length > 0 ? flowMeta.middlewares : undefined,
+            httpCode: flowMeta.httpCode,
+            redirect: flowMeta.redirect,
+            security: openApiMeta.security.length > 0 ? openApiMeta.security : undefined,
+            consumes: openApiMeta.consumes.length > 0 ? openApiMeta.consumes : undefined,
+            produces: openApiMeta.produces.length > 0 ? openApiMeta.produces : undefined,
+            apiParams: openApiMeta.apiParams.length > 0 ? openApiMeta.apiParams : undefined,
+            apiQueries: openApiMeta.apiQueries.length > 0 ? openApiMeta.apiQueries : undefined,
+            apiHeaders: openApiMeta.apiHeaders.length > 0 ? openApiMeta.apiHeaders : undefined,
+            apiBody: openApiMeta.apiBody,
+            responses: openApiMeta.responses.length > 0 ? openApiMeta.responses : undefined,
+            exclude: openApiMeta.exclude,
           });
         }
       }
@@ -174,6 +272,9 @@ export class AstParser {
       Put: 'put',
       Delete: 'delete',
       Patch: 'patch',
+      Options: 'options',
+      Head: 'head',
+      All: 'all',
     };
 
     const decorators = this.getDecorators(node);
@@ -213,14 +314,14 @@ export class AstParser {
         if (ts.isCallExpression(d.expression)) {
           const expr = d.expression.expression;
           if (ts.isIdentifier(expr)) {
-            const decoratorName = expr.text;
+            const dec = expr.text;
             let argName: string | undefined;
             const firstArg = d.expression.arguments[0];
             if (firstArg && ts.isStringLiteral(firstArg)) {
               argName = firstArg.text;
             }
 
-            if (decoratorName === 'Param') {
+            if (dec === 'Param') {
               params.push({
                 source: 'param',
                 name: argName || paramName,
@@ -231,7 +332,7 @@ export class AstParser {
               });
               matched = true;
               break;
-            } else if (decoratorName === 'Query') {
+            } else if (dec === 'Query') {
               params.push({
                 source: 'query',
                 name: argName || paramName,
@@ -242,7 +343,7 @@ export class AstParser {
               });
               matched = true;
               break;
-            } else if (decoratorName === 'Body') {
+            } else if (dec === 'Body') {
               params.push({
                 source: 'body',
                 index,
@@ -252,7 +353,7 @@ export class AstParser {
               });
               matched = true;
               break;
-            } else if (decoratorName === 'Header') {
+            } else if (dec === 'Header') {
               params.push({
                 source: 'header',
                 name: (argName || paramName).toLowerCase(),
@@ -263,7 +364,7 @@ export class AstParser {
               });
               matched = true;
               break;
-            } else if (decoratorName === 'Ctx') {
+            } else if (dec === 'Ctx') {
               params.push({
                 source: 'context',
                 index,
@@ -273,13 +374,74 @@ export class AstParser {
               });
               matched = true;
               break;
+            } else if (dec === 'Req' || dec === 'Request') {
+              params.push({
+                source: 'req',
+                index,
+                paramName,
+                type: 'Request',
+                required: true,
+              });
+              matched = true;
+              break;
+            } else if (dec === 'Res' || dec === 'Response') {
+              params.push({
+                source: 'res',
+                index,
+                paramName,
+                type: 'Response',
+                required: true,
+              });
+              matched = true;
+              break;
+            } else if (dec === 'Cookie') {
+              params.push({
+                source: 'cookie',
+                name: argName || paramName,
+                index,
+                paramName,
+                type: paramType,
+                required,
+              });
+              matched = true;
+              break;
+            } else if (dec === 'Queries') {
+              params.push({
+                source: 'queries',
+                index,
+                paramName,
+                type: paramType,
+                required: false,
+              });
+              matched = true;
+              break;
+            } else if (dec === 'Headers') {
+              params.push({
+                source: 'headers',
+                index,
+                paramName,
+                type: paramType,
+                required: false,
+              });
+              matched = true;
+              break;
+            } else if (dec === 'Params') {
+              params.push({
+                source: 'params',
+                index,
+                paramName,
+                type: paramType,
+                required: false,
+              });
+              matched = true;
+              break;
             }
           }
         }
       }
 
       if (!matched) {
-        // Default: treat as context if named c or ctx, else param
+        // Fallback parameter inferral
         if (paramName === 'c' || paramName === 'ctx') {
           params.push({
             source: 'context',
@@ -295,22 +457,106 @@ export class AstParser {
     return params;
   }
 
-  private extractMethodOpenApi(
+  private extractMethodFlow(
     node: ts.MethodDeclaration,
     sourceFile: ts.SourceFile
-  ): { summary?: string; description?: string; tags?: string[]; statusCode?: number; deprecated?: boolean } {
-    let summary: string | undefined;
-    let description: string | undefined;
-    let tags: string[] | undefined;
-    let statusCode: number | undefined;
-    let deprecated: boolean | undefined;
+  ): { middlewares: string[]; httpCode?: number; redirect?: RedirectInfo } {
+    const middlewares: string[] = [];
+    let httpCode: number | undefined;
+    let redirect: RedirectInfo | undefined;
 
     const decorators = this.getDecorators(node);
     for (const d of decorators) {
       if (ts.isCallExpression(d.expression)) {
         const expr = d.expression.expression;
         if (ts.isIdentifier(expr)) {
-          if (expr.text === 'ApiOperation') {
+          if (expr.text === 'Use' || expr.text === 'UseMiddleware') {
+            for (const arg of d.expression.arguments) {
+              middlewares.push(arg.getText(sourceFile));
+            }
+          } else if (expr.text === 'HttpCode') {
+            const arg = d.expression.arguments[0];
+            if (arg && ts.isNumericLiteral(arg)) {
+              httpCode = parseInt(arg.text, 10);
+            }
+          } else if (expr.text === 'Redirect') {
+            const urlArg = d.expression.arguments[0];
+            const statusArg = d.expression.arguments[1];
+            if (urlArg && ts.isStringLiteral(urlArg)) {
+              const status =
+                statusArg && ts.isNumericLiteral(statusArg)
+                  ? parseInt(statusArg.text, 10)
+                  : 302;
+              redirect = { url: urlArg.text, status };
+            }
+          }
+        }
+      }
+    }
+
+    return { middlewares, httpCode, redirect };
+  }
+
+  private extractMethodOpenApi(
+    node: ts.MethodDeclaration,
+    sourceFile: ts.SourceFile
+  ): {
+    summary?: string;
+    description?: string;
+    tags?: string[];
+    statusCode?: number;
+    deprecated?: boolean;
+    security: ApiSecurityRequirement[];
+    consumes: string[];
+    produces: string[];
+    apiParams: ApiParamInfo[];
+    apiQueries: ApiQueryInfo[];
+    apiHeaders: ApiHeaderInfo[];
+    apiBody?: ApiBodyInfo;
+    responses: ApiResponseInfo[];
+    exclude?: boolean;
+  } {
+    let summary: string | undefined;
+    let description: string | undefined;
+    let tags: string[] | undefined;
+    let statusCode: number | undefined;
+    let deprecated: boolean | undefined;
+    const security: ApiSecurityRequirement[] = [];
+    const consumes: string[] = [];
+    const produces: string[] = [];
+    const apiParams: ApiParamInfo[] = [];
+    const apiQueries: ApiQueryInfo[] = [];
+    const apiHeaders: ApiHeaderInfo[] = [];
+    let apiBody: ApiBodyInfo | undefined;
+    const responses: ApiResponseInfo[] = [];
+    let exclude: boolean | undefined;
+
+    const responseShortcuts: Record<string, number> = {
+      ApiOkResponse: 200,
+      ApiCreatedResponse: 201,
+      ApiAcceptedResponse: 202,
+      ApiNoContentResponse: 204,
+      ApiBadRequestResponse: 400,
+      ApiUnauthorizedResponse: 401,
+      ApiForbiddenResponse: 403,
+      ApiNotFoundResponse: 404,
+      ApiConflictResponse: 409,
+      ApiInternalServerErrorResponse: 500,
+    };
+
+    const decorators = this.getDecorators(node);
+    for (const d of decorators) {
+      const sec = this.parseSecurityDecorator(d);
+      if (sec) {
+        security.push(sec);
+      }
+
+      if (ts.isCallExpression(d.expression)) {
+        const expr = d.expression.expression;
+        if (ts.isIdentifier(expr)) {
+          const dec = expr.text;
+
+          if (dec === 'ApiOperation') {
             const arg = d.expression.arguments[0];
             if (arg && ts.isObjectLiteralExpression(arg)) {
               for (const prop of arg.properties) {
@@ -319,36 +565,197 @@ export class AstParser {
                     summary = prop.initializer.text;
                   } else if (prop.name.text === 'description' && ts.isStringLiteral(prop.initializer)) {
                     description = prop.initializer.text;
-                  } else if (prop.name.text === 'deprecated' && prop.initializer.kind === ts.SyntaxKind.TrueKeyword) {
+                  } else if (
+                    prop.name.text === 'deprecated' &&
+                    prop.initializer.kind === ts.SyntaxKind.TrueKeyword
+                  ) {
                     deprecated = true;
                   }
                 }
               }
             }
-          } else if (expr.text === 'ApiResponse') {
+          } else if (dec === 'ApiResponse') {
             const arg = d.expression.arguments[0];
             if (arg && ts.isObjectLiteralExpression(arg)) {
+              let respStatus = 200;
+              let respDesc: string | undefined;
               for (const prop of arg.properties) {
                 if (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.name)) {
                   if (prop.name.text === 'status' && ts.isNumericLiteral(prop.initializer)) {
-                    statusCode = parseInt(prop.initializer.text, 10);
+                    respStatus = parseInt(prop.initializer.text, 10);
+                  } else if (prop.name.text === 'description' && ts.isStringLiteral(prop.initializer)) {
+                    respDesc = prop.initializer.text;
                   }
                 }
               }
+              responses.push({ status: respStatus, description: respDesc });
+              if (!statusCode) statusCode = respStatus;
             }
-          } else if (expr.text === 'ApiTags') {
+          } else if (responseShortcuts[dec] !== undefined) {
+            const status = responseShortcuts[dec];
+            let respDesc: string | undefined;
+            const arg = d.expression.arguments[0];
+            if (arg && ts.isObjectLiteralExpression(arg)) {
+              for (const prop of arg.properties) {
+                if (
+                  ts.isPropertyAssignment(prop) &&
+                  ts.isIdentifier(prop.name) &&
+                  prop.name.text === 'description' &&
+                  ts.isStringLiteral(prop.initializer)
+                ) {
+                  respDesc = prop.initializer.text;
+                }
+              }
+            }
+            responses.push({ status, description: respDesc });
+            if (!statusCode) statusCode = status;
+          } else if (dec === 'ApiTags') {
             tags = tags || [];
             for (const arg of d.expression.arguments) {
               if (ts.isStringLiteral(arg)) {
                 tags.push(arg.text);
               }
             }
+          } else if (dec === 'ApiConsumes') {
+            for (const arg of d.expression.arguments) {
+              if (ts.isStringLiteral(arg)) {
+                consumes.push(arg.text);
+              }
+            }
+          } else if (dec === 'ApiProduces') {
+            for (const arg of d.expression.arguments) {
+              if (ts.isStringLiteral(arg)) {
+                produces.push(arg.text);
+              }
+            }
+          } else if (dec === 'ApiParam') {
+            const info = this.parseParamOrQueryDoc(d.expression.arguments[0]);
+            if (info) apiParams.push(info);
+          } else if (dec === 'ApiQuery') {
+            const info = this.parseParamOrQueryDoc(d.expression.arguments[0]);
+            if (info) apiQueries.push(info);
+          } else if (dec === 'ApiHeader') {
+            const info = this.parseParamOrQueryDoc(d.expression.arguments[0]);
+            if (info) apiHeaders.push(info);
+          } else if (dec === 'ApiBody') {
+            const arg = d.expression.arguments[0];
+            if (arg && ts.isObjectLiteralExpression(arg)) {
+              let bodyDesc: string | undefined;
+              let bodyReq = true;
+              let mediaType: string | undefined;
+              for (const p of arg.properties) {
+                if (ts.isPropertyAssignment(p) && ts.isIdentifier(p.name)) {
+                  if (p.name.text === 'description' && ts.isStringLiteral(p.initializer)) {
+                    bodyDesc = p.initializer.text;
+                  } else if (p.name.text === 'required') {
+                    bodyReq = p.initializer.kind !== ts.SyntaxKind.FalseKeyword;
+                  } else if (p.name.text === 'mediaType' && ts.isStringLiteral(p.initializer)) {
+                    mediaType = p.initializer.text;
+                  }
+                }
+              }
+              apiBody = { description: bodyDesc, required: bodyReq, mediaType };
+            }
+          } else if (dec === 'ApiExcludeEndpoint') {
+            const arg = d.expression.arguments[0];
+            exclude = !(arg && arg.kind === ts.SyntaxKind.FalseKeyword);
           }
         }
       }
     }
 
-    return { summary, description, tags, statusCode, deprecated };
+    return {
+      summary,
+      description,
+      tags,
+      statusCode,
+      deprecated,
+      security,
+      consumes,
+      produces,
+      apiParams,
+      apiQueries,
+      apiHeaders,
+      apiBody,
+      responses,
+      exclude,
+    };
+  }
+
+  private parseParamOrQueryDoc(argNode?: ts.Expression): ApiParamInfo | null {
+    if (!argNode || !ts.isObjectLiteralExpression(argNode)) return null;
+    let name = '';
+    let description: string | undefined;
+    let required: boolean | undefined;
+    let example: any;
+    let type: string | undefined;
+
+    for (const p of argNode.properties) {
+      if (ts.isPropertyAssignment(p) && ts.isIdentifier(p.name)) {
+        if (p.name.text === 'name' && ts.isStringLiteral(p.initializer)) {
+          name = p.initializer.text;
+        } else if (p.name.text === 'description' && ts.isStringLiteral(p.initializer)) {
+          description = p.initializer.text;
+        } else if (p.name.text === 'required') {
+          required = p.initializer.kind !== ts.SyntaxKind.FalseKeyword;
+        } else if (p.name.text === 'example' && ts.isStringLiteral(p.initializer)) {
+          example = p.initializer.text;
+        } else if (p.name.text === 'type' && ts.isStringLiteral(p.initializer)) {
+          type = p.initializer.text;
+        }
+      }
+    }
+
+    return name ? { name, description, required, example, type } : null;
+  }
+
+  private parseSecurityDecorator(d: ts.Decorator): ApiSecurityRequirement | null {
+    if (!ts.isCallExpression(d.expression)) return null;
+    const expr = d.expression.expression;
+    if (!ts.isIdentifier(expr)) return null;
+    const dec = expr.text;
+
+    if (dec === 'ApiBearerAuth') {
+      let schemeName = 'bearer';
+      const arg = d.expression.arguments[0];
+      if (arg && ts.isStringLiteral(arg)) schemeName = arg.text;
+      return { [schemeName]: [] };
+    } else if (dec === 'ApiSecurity') {
+      const nameArg = d.expression.arguments[0];
+      let name = 'default';
+      if (nameArg && ts.isStringLiteral(nameArg)) name = nameArg.text;
+      const scopes: string[] = [];
+      const scopesArg = d.expression.arguments[1];
+      if (scopesArg && ts.isArrayLiteralExpression(scopesArg)) {
+        for (const el of scopesArg.elements) {
+          if (ts.isStringLiteral(el)) scopes.push(el.text);
+        }
+      }
+      return { [name]: scopes };
+    } else if (dec === 'ApiBasicAuth') {
+      let name = 'basic';
+      const arg = d.expression.arguments[0];
+      if (arg && ts.isStringLiteral(arg)) name = arg.text;
+      return { [name]: [] };
+    } else if (dec === 'ApiKeyAuth') {
+      let name = 'api-key';
+      const arg = d.expression.arguments[0];
+      if (arg && ts.isObjectLiteralExpression(arg)) {
+        for (const p of arg.properties) {
+          if (
+            ts.isPropertyAssignment(p) &&
+            ts.isIdentifier(p.name) &&
+            p.name.text === 'name' &&
+            ts.isStringLiteral(p.initializer)
+          ) {
+            name = p.initializer.text;
+          }
+        }
+      }
+      return { [name]: [] };
+    }
+
+    return null;
   }
 
   private extractModelSchema(node: ts.ClassDeclaration): ModelSchemaInfo | null {
@@ -362,36 +769,58 @@ export class AstParser {
         for (const d of decorators) {
           if (ts.isCallExpression(d.expression)) {
             const expr = d.expression.expression;
-            if (ts.isIdentifier(expr) && expr.text === 'ApiProperty') {
-              let propType = 'string';
-              if (member.type) {
-                propType = member.type.getText();
-              }
-              const required = !member.questionToken;
+            if (ts.isIdentifier(expr)) {
+              if (expr.text === 'ApiProperty') {
+                let propType = 'string';
+                if (member.type) {
+                  propType = member.type.getText();
+                }
+                const required = !member.questionToken;
 
-              let desc: string | undefined;
-              let example: any;
+                let desc: string | undefined;
+                let example: any;
+                let isArray = false;
+                const enumValues: (string | number)[] = [];
 
-              const arg = d.expression.arguments[0];
-              if (arg && ts.isObjectLiteralExpression(arg)) {
-                for (const p of arg.properties) {
-                  if (ts.isPropertyAssignment(p) && ts.isIdentifier(p.name)) {
-                    if (p.name.text === 'description' && ts.isStringLiteral(p.initializer)) {
-                      desc = p.initializer.text;
-                    } else if (p.name.text === 'example' && ts.isStringLiteral(p.initializer)) {
-                      example = p.initializer.text;
+                const arg = d.expression.arguments[0];
+                if (arg && ts.isObjectLiteralExpression(arg)) {
+                  for (const p of arg.properties) {
+                    if (ts.isPropertyAssignment(p) && ts.isIdentifier(p.name)) {
+                      if (p.name.text === 'description' && ts.isStringLiteral(p.initializer)) {
+                        desc = p.initializer.text;
+                      } else if (p.name.text === 'example' && ts.isStringLiteral(p.initializer)) {
+                        example = p.initializer.text;
+                      } else if (
+                        p.name.text === 'isArray' &&
+                        p.initializer.kind === ts.SyntaxKind.TrueKeyword
+                      ) {
+                        isArray = true;
+                      } else if (p.name.text === 'enum' && ts.isArrayLiteralExpression(p.initializer)) {
+                        for (const el of p.initializer.elements) {
+                          if (ts.isStringLiteral(el)) enumValues.push(el.text);
+                          else if (ts.isNumericLiteral(el)) enumValues.push(parseFloat(el.text));
+                        }
+                      }
                     }
                   }
                 }
-              }
 
-              properties.push({
-                name: propName,
-                type: propType,
-                required,
-                description: desc,
-                example,
-              });
+                properties.push({
+                  name: propName,
+                  type: propType,
+                  required,
+                  description: desc,
+                  example,
+                  enum: enumValues.length > 0 ? enumValues : undefined,
+                });
+              } else if (expr.text === 'ApiHideProperty') {
+                properties.push({
+                  name: propName,
+                  type: 'any',
+                  required: false,
+                  hide: true,
+                });
+              }
             }
           }
         }
@@ -401,7 +830,7 @@ export class AstParser {
     if (properties.length > 0 && node.name) {
       return {
         className: node.name.text,
-        properties,
+        properties: properties.filter((p) => !p.hide),
       };
     }
 

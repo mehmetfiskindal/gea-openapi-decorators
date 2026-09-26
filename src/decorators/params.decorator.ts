@@ -1,7 +1,13 @@
 import type { ParamSource } from '../types/index.js';
 
+export type GeaParamDecorator = (
+  target: any,
+  propertyKey: string | symbol | undefined,
+  parameterIndex: number
+) => void;
+
 export function createParamDecorator(source: ParamSource) {
-  return (name?: string): ParameterDecorator => {
+  return (name?: string): GeaParamDecorator => {
     return (target: any, propertyKey: string | symbol | undefined, parameterIndex: number): void => {
       if (!propertyKey) return;
       if (!target.__gea_params__) {
@@ -25,3 +31,13 @@ export const Query = createParamDecorator('query');
 export const Body = createParamDecorator('body');
 export const Header = createParamDecorator('header');
 export const Ctx = createParamDecorator('context');
+
+// New Advanced Parameter Decorators
+export const Req = createParamDecorator('req');
+export const Request = Req;
+export const Res = createParamDecorator('res');
+export const Response = Res;
+export const Cookie = createParamDecorator('cookie');
+export const Queries = createParamDecorator('queries');
+export const Headers = createParamDecorator('headers');
+export const Params = createParamDecorator('params');

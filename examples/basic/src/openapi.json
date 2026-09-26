@@ -24,7 +24,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful response",
+            "description": "List of todos",
             "content": {
               "application/json": {
                 "schema": {
@@ -52,7 +52,7 @@
         },
         "responses": {
           "201": {
-            "description": "Created",
+            "description": "Created todo",
             "content": {
               "application/json": {
                 "schema": {
@@ -82,7 +82,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful response",
+            "description": "The requested todo item",
             "content": {
               "application/json": {
                 "schema": {
@@ -110,7 +110,7 @@
         ],
         "responses": {
           "204": {
-            "description": "Successful response",
+            "description": "Todo deleted",
             "content": {
               "application/json": {
                 "schema": {
@@ -167,6 +167,7 @@
           "completed"
         ]
       }
-    }
+    },
+    "securitySchemes": {}
   }
 }

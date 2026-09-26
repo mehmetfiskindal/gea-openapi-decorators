@@ -193,6 +193,7 @@ Options:
 
 ## 📋 Supported Decorators
 
+### 1. HTTP Methods
 | Decorator | Target | Description |
 |-----------|--------|-------------|
 | `@Controller(basePath)` | Class | Defines base path for all routes in class |
@@ -201,15 +202,64 @@ Options:
 | `@Put(path)` | Method | Registers HTTP PUT route |
 | `@Delete(path)` | Method | Registers HTTP DELETE route |
 | `@Patch(path)` | Method | Registers HTTP PATCH route |
-| `@Param(name)` | Parameter | Injects route parameter (`c.req.param(name)`) |
-| `@Query(name)` | Parameter | Injects query parameter (`c.req.query(name)`) |
-| `@Body()` | Parameter | Injects parsed JSON request body (`await c.req.json()`) |
-| `@Header(name)` | Parameter | Injects request header (`c.req.header(name)`) |
-| `@Ctx()` | Parameter | Injects raw Hono context `c` |
-| `@ApiTags(...tags)` | Class/Method | Groups endpoints in OpenAPI |
-| `@ApiOperation(options)` | Method | Summary & description metadata |
-| `@ApiResponse(options)` | Method | Response schema and HTTP status codes |
-| `@ApiProperty(options)` | DTO Property | Model property description, example, types |
+| `@Options(path)` | Method | Registers HTTP OPTIONS route |
+| `@Head(path)` | Method | Registers HTTP HEAD route |
+| `@All(path)` | Method | Registers route for all HTTP verbs (`app.all(...)`) |
+
+### 2. Parameter Injection
+| Decorator | Target | Injected Value |
+|-----------|--------|----------------|
+| `@Param(name)` | Parameter | Named route parameter (`c.req.param(name)`) |
+| `@Params()` | Parameter | All route parameters object (`c.req.param()`) |
+| `@Query(name)` | Parameter | Named query parameter (`c.req.query(name)`) |
+| `@Queries()` | Parameter | All query parameters object (`c.req.queries()`) |
+| `@Header(name)` | Parameter | Named request header (`c.req.header(name)`) |
+| `@Headers()` | Parameter | All request headers object (`c.req.header()`) |
+| `@Cookie(name)` | Parameter | Cookie value (`getCookie(c, name)`) |
+| `@Body()` | Parameter | Parsed JSON request body (`await c.req.json()`) |
+| `@Ctx()` | Parameter | Raw Hono context `c` |
+| `@Req()` / `@Request()` | Parameter | Raw Request object (`c.req.raw`) |
+| `@Res()` / `@Response()` | Parameter | Raw Response object / context helper |
+
+### 3. Flow & Middleware Control
+| Decorator | Target | Description |
+|-----------|--------|-------------|
+| `@HttpCode(status)` | Method | Overrides default status code (e.g. `@HttpCode(204)`) |
+| `@Redirect(url, status?)` | Method | Issues HTTP redirect (default: 302) |
+| `@Use(...middlewares)` | Class / Method | Attaches Hono middlewares to controller or individual handler |
+| `@UseMiddleware(...)` | Class / Method | Alias for `@Use` |
+
+### 4. OpenAPI 3.1 Metadata & Security
+| Decorator | Target | Description |
+|-----------|--------|-------------|
+| `@ApiTags(...tags)` | Class / Method | Groups endpoints in OpenAPI |
+| `@ApiOperation(options)` | Method | Summary, description, deprecated, tags metadata |
+| `@ApiResponse(options)` | Method | Custom HTTP status code, description, and return type |
+| `@ApiOkResponse(options?)` | Method | Shortcut for status `200 OK` |
+| `@ApiCreatedResponse(options?)` | Method | Shortcut for status `201 Created` |
+| `@ApiAcceptedResponse(options?)` | Method | Shortcut for status `202 Accepted` |
+| `@ApiNoContentResponse(options?)` | Method | Shortcut for status `204 No Content` |
+| `@ApiBadRequestResponse(options?)` | Method | Shortcut for status `400 Bad Request` |
+| `@ApiUnauthorizedResponse(options?)` | Method | Shortcut for status `401 Unauthorized` |
+| `@ApiForbiddenResponse(options?)` | Method | Shortcut for status `403 Forbidden` |
+| `@ApiNotFoundResponse(options?)` | Method | Shortcut for status `404 Not Found` |
+| `@ApiConflictResponse(options?)` | Method | Shortcut for status `409 Conflict` |
+| `@ApiInternalServerErrorResponse(options?)` | Method | Shortcut for status `500 Internal Server Error` |
+| `@ApiBearerAuth(name?)` | Class / Method | Attaches Bearer JWT security scheme |
+| `@ApiSecurity(name, scopes?)` | Class / Method | Attaches named security scheme with scopes |
+| `@ApiBasicAuth(name?)` | Class / Method | Attaches HTTP Basic auth security |
+| `@ApiKeyAuth(options?)` | Class / Method | Attaches API Key security (header/query/cookie) |
+| `@ApiConsumes(...types)` | Method | Request MIME types (e.g. `application/json`, `multipart/form-data`) |
+| `@ApiProduces(...types)` | Method | Response MIME types (e.g. `application/json`, `text/plain`) |
+| `@ApiParam(options)` | Method | Explicit parameter documentation |
+| `@ApiQuery(options)` | Method | Explicit query parameter documentation |
+| `@ApiHeader(options)` | Method | Explicit request header documentation |
+| `@ApiBody(options)` | Method | Explicit request body documentation |
+| `@ApiExcludeEndpoint()` | Method | Hides route from generated OpenAPI document |
+| `@ApiExcludeController()` | Class | Hides entire controller from OpenAPI document |
+| `@ApiProperty(options)` | Property | DTO property documentation (type, format, enum, example) |
+| `@ApiHideProperty()` | Property | Excludes property from DTO OpenAPI schema |
+| `@ApiExtraModels(...models)` | Class / Method | Explicitly registers DTO models into OpenAPI components |
 
 ---
 

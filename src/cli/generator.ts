@@ -3,6 +3,7 @@ import type {
   ParsedProject,
   RouteMethodInfo,
   OpenApiDocument,
+  OpenApiSchemaObject,
 } from '../types/index.js';
 
 export class CodeGenerator {
@@ -36,9 +37,26 @@ export class CodeGenerator {
         const honoPath = fullPath;
         const handlerCode = this.generateHandlerCode(varName, method);
 
-        routeRegistrations.push(
-          `  app.${method.httpMethod}('${honoPath}', ${handlerCode});`
-        );
+        const allMiddlewares = [
+          ...(controller.middlewares || []),
+          ...(method.middlewares || []),
+        ];
+        const middlewareStr =
+          allMiddlewares.length > 0 ? `${allMiddlewares.join(', ')}, ` : '';
+
+        if (method.httpMethod === 'head') {
+          routeRegistrations.push(
+            `  app.on('HEAD', '${honoPath}', ${middlewareStr}${handlerCode});`
+          );
+        } else if (method.httpMethod === 'all') {
+          routeRegistrations.push(
+            `  app.all('${honoPath}', ${middlewareStr}${handlerCode});`
+          );
+        } else {
+          routeRegistrations.push(
+            `  app.${method.httpMethod}('${honoPath}', ${middlewareStr}${handlerCode});`
+          );
+        }
       }
     }
 
@@ -81,13 +99,50 @@ ${routeRegistrations.join('\n')}
         callArgs.push(varName);
       } else if (p.source === 'context') {
         callArgs.push('c');
+      } else if (p.source === 'req') {
+        callArgs.push('c.req');
+      } else if (p.source === 'res') {
+        callArgs.push('c.res');
+      } else if (p.source === 'cookie') {
+        const varName = `cookie_${(p.name || p.paramName).replace(/[^a-zA-Z0-9]/g, '_')}`;
+        if (p.name) {
+          paramExtracts.push(
+            `    const ${varName} = (c.req.header('cookie')?.match(new RegExp('(?:^|; )${p.name}=([^;]*)')) || [])[1];`
+          );
+        } else {
+          paramExtracts.push(`    const ${varName} = c.req.header('cookie');`);
+        }
+        callArgs.push(varName);
+      } else if (p.source === 'queries') {
+        const varName = `queries_${p.paramName}`;
+        paramExtracts.push(`    const ${varName} = c.req.query();`);
+        callArgs.push(varName);
+      } else if (p.source === 'headers') {
+        const varName = `headers_${p.paramName}`;
+        paramExtracts.push(`    const ${varName} = c.req.header();`);
+        callArgs.push(varName);
+      } else if (p.source === 'params') {
+        const varName = `params_${p.paramName}`;
+        paramExtracts.push(`    const ${varName} = c.req.param();`);
+        callArgs.push(varName);
       }
     }
 
     const awaitKeyword = method.isAsync ? 'await ' : '';
-    const statusCode = method.statusCode ?? (method.httpMethod === 'post' ? 201 : 200);
-
+    const statusCode =
+      method.httpCode ?? method.statusCode ?? (method.httpMethod === 'post' ? 201 : 200);
     const callExpression = `${awaitKeyword}${controllerVar}.${method.methodName}(${callArgs.join(', ')})`;
+
+    if (method.redirect) {
+      const redirectStatus = method.redirect.status ?? 302;
+      return [
+        `async (c: any) => {`,
+        ...paramExtracts,
+        `    ${callExpression};`,
+        `    return c.redirect('${method.redirect.url}', ${redirectStatus});`,
+        `  }`,
+      ].join('\n');
+    }
 
     const lines: string[] = [
       `async (c: any) => {`,
@@ -106,7 +161,10 @@ ${routeRegistrations.join('\n')}
     return lines.join('\n');
   }
 
-  public generateOpenApiSpec(title: string = 'GeaStack API', version: string = '1.0.0'): OpenApiDocument {
+  public generateOpenApiSpec(
+    title: string = 'GeaStack API',
+    version: string = '1.0.0'
+  ): OpenApiDocument {
     const doc: OpenApiDocument = {
       openapi: '3.1.0',
       info: {
@@ -117,35 +175,45 @@ ${routeRegistrations.join('\n')}
       paths: {},
       components: {
         schemas: {},
+        securitySchemes: {},
       },
     };
 
-    // Add models
+    // 1. Populate Schemas from Models
     for (const model of this.parsed.models) {
       const properties: Record<string, any> = {};
-      const requiredProps: string[] = [];
+      const required: string[] = [];
 
       for (const prop of model.properties) {
+        if (prop.hide) continue;
         properties[prop.name] = {
           type: this.mapTsTypeToOpenApi(prop.type),
           description: prop.description,
           example: prop.example,
+          enum: prop.enum,
         };
         if (prop.required) {
-          requiredProps.push(prop.name);
+          required.push(prop.name);
         }
       }
 
-      doc.components!.schemas![model.className] = {
+      if (!doc.components) doc.components = {};
+      if (!doc.components.schemas) doc.components.schemas = {};
+
+      doc.components.schemas[model.className] = {
         type: 'object',
         properties,
-        required: requiredProps.length > 0 ? requiredProps : undefined,
+        required: required.length > 0 ? required : undefined,
       };
     }
 
-    // Add paths
+    // 2. Populate Routes
     for (const controller of this.parsed.controllers) {
+      if (controller.exclude) continue;
+
       for (const method of controller.methods) {
+        if (method.exclude) continue;
+
         const fullPath = this.combinePaths(controller.basePath, method.path);
         const openApiPath = fullPath.replace(/:([a-zA-Z0-9_]+)/g, '{$1}');
 
@@ -157,6 +225,7 @@ ${routeRegistrations.join('\n')}
         const parameters: any[] = [];
         let requestBody: any = undefined;
 
+        // Auto inferred parameters
         for (const p of method.params) {
           if (p.source === 'param') {
             parameters.push({
@@ -179,11 +248,21 @@ ${routeRegistrations.join('\n')}
               required: p.required,
               schema: { type: 'string' },
             });
+          } else if (p.source === 'cookie') {
+            if (p.name) {
+              parameters.push({
+                name: p.name,
+                in: 'cookie',
+                required: p.required,
+                schema: { type: 'string' },
+              });
+            }
           } else if (p.source === 'body') {
+            const consumesType = method.consumes?.[0] || 'application/json';
             requestBody = {
               required: true,
               content: {
-                'application/json': {
+                [consumesType]: {
                   schema: this.isCustomModel(p.type)
                     ? { $ref: `#/components/schemas/${p.type}` }
                     : { type: this.mapTsTypeToOpenApi(p.type) },
@@ -193,25 +272,134 @@ ${routeRegistrations.join('\n')}
           }
         }
 
-        const statusCode = method.statusCode ?? (method.httpMethod === 'post' ? 201 : 200);
+        // Explicit method parameters (@ApiParam, @ApiQuery, @ApiHeader)
+        if (method.apiParams) {
+          for (const ap of method.apiParams) {
+            parameters.push({
+              name: ap.name,
+              in: 'path',
+              description: ap.description,
+              required: true,
+              schema: { type: ap.type ? this.mapTsTypeToOpenApi(ap.type) : 'string' },
+              example: ap.example,
+            });
+          }
+        }
+        if (method.apiQueries) {
+          for (const aq of method.apiQueries) {
+            parameters.push({
+              name: aq.name,
+              in: 'query',
+              description: aq.description,
+              required: aq.required ?? false,
+              schema: { type: aq.type ? this.mapTsTypeToOpenApi(aq.type) : 'string' },
+              example: aq.example,
+            });
+          }
+        }
+        if (method.apiHeaders) {
+          for (const ah of method.apiHeaders) {
+            parameters.push({
+              name: ah.name,
+              in: 'header',
+              description: ah.description,
+              required: ah.required ?? false,
+              schema: { type: ah.type ? this.mapTsTypeToOpenApi(ah.type) : 'string' },
+              example: ah.example,
+            });
+          }
+        }
 
-        doc.paths[openApiPath][method.httpMethod] = {
+        // Explicit @ApiBody
+        if (method.apiBody) {
+          const mediaType = method.apiBody.mediaType || method.consumes?.[0] || 'application/json';
+          requestBody = {
+            description: method.apiBody.description,
+            required: method.apiBody.required ?? true,
+            content: {
+              [mediaType]: {
+                schema: method.apiBody.type && this.isCustomModel(method.apiBody.type)
+                  ? { $ref: `#/components/schemas/${method.apiBody.type}` }
+                  : { type: 'object' },
+              },
+            },
+          };
+        }
+
+        // Security requirements & Component security schemes
+        const combinedSecurity = method.security || controller.security;
+        if (combinedSecurity && combinedSecurity.length > 0) {
+          for (const secReq of combinedSecurity) {
+            for (const secKey of Object.keys(secReq)) {
+              if (!doc.components) doc.components = {};
+              if (!doc.components.securitySchemes) doc.components.securitySchemes = {};
+
+              if (secKey.toLowerCase().includes('bearer')) {
+                doc.components.securitySchemes[secKey] = {
+                  type: 'http',
+                  scheme: 'bearer',
+                  bearerFormat: 'JWT',
+                };
+              } else if (secKey.toLowerCase().includes('basic')) {
+                doc.components.securitySchemes[secKey] = {
+                  type: 'http',
+                  scheme: 'basic',
+                };
+              } else if (secKey.toLowerCase().includes('key')) {
+                doc.components.securitySchemes[secKey] = {
+                  type: 'apiKey',
+                  in: 'header',
+                  name: 'x-api-key',
+                };
+              } else {
+                doc.components.securitySchemes[secKey] = {
+                  type: 'http',
+                  scheme: 'bearer',
+                };
+              }
+            }
+          }
+        }
+
+        // Responses
+        const producesType = method.produces?.[0] || 'application/json';
+        const responses: Record<string, any> = {};
+
+        if (method.responses && method.responses.length > 0) {
+          for (const resp of method.responses) {
+            responses[resp.status] = {
+              description: resp.description || `Response ${resp.status}`,
+              content: {
+                [producesType]: {
+                  schema: { type: 'object' },
+                },
+              },
+            };
+          }
+        } else {
+          const defaultStatusCode =
+            method.httpCode ?? method.statusCode ?? (method.httpMethod === 'post' ? 201 : 200);
+          responses[defaultStatusCode] = {
+            description: defaultStatusCode === 201 ? 'Created' : 'Successful response',
+            content: {
+              [producesType]: {
+                schema: { type: 'object' },
+              },
+            },
+          };
+        }
+
+        const httpVerb = method.httpMethod === 'all' ? 'get' : method.httpMethod;
+
+        doc.paths[openApiPath][httpVerb] = {
           summary: method.summary || `${method.methodName} operation`,
           description: method.description,
           tags: tags.length > 0 ? tags : undefined,
           deprecated: method.deprecated,
           parameters: parameters.length > 0 ? parameters : undefined,
           requestBody,
-          responses: {
-            [statusCode]: {
-              description: statusCode === 201 ? 'Created' : 'Successful response',
-              content: {
-                'application/json': {
-                  schema: { type: 'object' },
-                },
-              },
-            },
-          },
+          security: combinedSecurity && combinedSecurity.length > 0 ? combinedSecurity : undefined,
+          responses,
         };
       }
     }
