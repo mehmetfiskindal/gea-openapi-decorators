@@ -7,47 +7,47 @@ import { TodoController } from './controllers/todo.controller.js';
 export function registerRoutes(app: Hono): void {
   const todoController = new TodoController();
 
-  app.get('/todos', async (c) => {
+  app.get('/todos', async (c: any) => {
     const query_search = c.req.query('search');
     const result = todoController.list(query_search);
-    if (result instanceof Response) {
+    if ((result as any) instanceof (Response as any)) {
       return result;
     }
     if (result === undefined || result === null) {
-      return c.body(null, 204);
+      return c.body(null as any, 204);
     }
     return c.json(result, 200);
   });
-  app.get('/todos/:id', async (c) => {
+  app.get('/todos/:id', async (c: any) => {
     const param_id = c.req.param('id');
     const result = todoController.getById(param_id);
-    if (result instanceof Response) {
+    if ((result as any) instanceof (Response as any)) {
       return result;
     }
     if (result === undefined || result === null) {
-      return c.body(null, 204);
+      return c.body(null as any, 204);
     }
     return c.json(result, 200);
   });
-  app.post('/todos', async (c) => {
+  app.post('/todos', async (c: any) => {
     const body_body = await c.req.json();
     const result = todoController.create(body_body);
-    if (result instanceof Response) {
+    if ((result as any) instanceof (Response as any)) {
       return result;
     }
     if (result === undefined || result === null) {
-      return c.body(null, 201);
+      return c.body(null as any, 201);
     }
     return c.json(result, 201);
   });
-  app.delete('/todos/:id', async (c) => {
+  app.delete('/todos/:id', async (c: any) => {
     const param_id = c.req.param('id');
     const result = todoController.delete(param_id);
-    if (result instanceof Response) {
+    if ((result as any) instanceof (Response as any)) {
       return result;
     }
     if (result === undefined || result === null) {
-      return c.body(null, 204);
+      return c.body(null as any, 204);
     }
     return c.json(result, 204);
   });

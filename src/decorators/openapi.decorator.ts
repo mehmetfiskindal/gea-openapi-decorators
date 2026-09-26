@@ -18,7 +18,11 @@ export interface ApiPropertyOptions {
   enum?: (string | number)[];
 }
 
-export function ApiTags(...tags: string[]): ClassDecorator & MethodDecorator {
+export type GeaMethodDecorator = (target: any, propertyKey: string | symbol, descriptor?: any) => void;
+export type GeaClassDecorator = (target: any) => void;
+export type GeaPropertyDecorator = (target: any, propertyKey: string | symbol) => void;
+
+export function ApiTags(...tags: string[]): (target: any, propertyKey?: string | symbol) => void {
   return (target: any, propertyKey?: string | symbol): void => {
     if (propertyKey) {
       if (!target.__gea_method_tags__) target.__gea_method_tags__ = {};
@@ -29,14 +33,14 @@ export function ApiTags(...tags: string[]): ClassDecorator & MethodDecorator {
   };
 }
 
-export function ApiOperation(options: ApiOperationOptions): MethodDecorator {
+export function ApiOperation(options: ApiOperationOptions): GeaMethodDecorator {
   return (target: any, propertyKey: string | symbol): void => {
     if (!target.__gea_operations__) target.__gea_operations__ = {};
     target.__gea_operations__[String(propertyKey)] = options;
   };
 }
 
-export function ApiResponse(options: ApiResponseOptions): MethodDecorator {
+export function ApiResponse(options: ApiResponseOptions): GeaMethodDecorator {
   return (target: any, propertyKey: string | symbol): void => {
     if (!target.__gea_responses__) target.__gea_responses__ = {};
     const key = String(propertyKey);
@@ -45,7 +49,7 @@ export function ApiResponse(options: ApiResponseOptions): MethodDecorator {
   };
 }
 
-export function ApiProperty(options: ApiPropertyOptions = {}): PropertyDecorator {
+export function ApiProperty(options: ApiPropertyOptions = {}): GeaPropertyDecorator {
   return (target: any, propertyKey: string | symbol): void => {
     if (!target.__gea_properties__) target.__gea_properties__ = [];
     target.__gea_properties__.push({

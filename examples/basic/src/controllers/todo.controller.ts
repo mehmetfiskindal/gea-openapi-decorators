@@ -16,8 +16,8 @@ import { CreateTodoDto, TodoDto } from '../models/todo.dto.js';
 @Controller('/todos')
 export class TodoController {
   private todos: TodoDto[] = [
-    { id: '1', title: 'Learn GeaStack', completed: true },
-    { id: '2', title: 'Build fast C++ APIs', completed: false },
+    new TodoDto('1', 'Learn GeaStack', true),
+    new TodoDto('2', 'Build fast C++ APIs', false),
   ];
 
   @ApiOperation({ summary: 'List all todos' })
@@ -45,11 +45,11 @@ export class TodoController {
   @ApiResponse({ status: 201, description: 'Created todo' })
   @Post('/')
   create(@Body() body: CreateTodoDto) {
-    const newTodo: TodoDto = {
-      id: String(this.todos.length + 1),
-      title: body.title,
-      completed: false,
-    };
+    const newTodo = new TodoDto(
+      String(this.todos.length + 1),
+      body.title,
+      false
+    );
     this.todos.push(newTodo);
     return newTodo;
   }
@@ -57,8 +57,7 @@ export class TodoController {
   @ApiOperation({ summary: 'Delete a todo by ID' })
   @ApiResponse({ status: 204, description: 'Todo deleted' })
   @Delete('/:id')
-  delete(@Param('id') id: string) {
+  delete(@Param('id') id: string): void {
     this.todos = this.todos.filter((t) => t.id !== id);
-    return null;
   }
 }

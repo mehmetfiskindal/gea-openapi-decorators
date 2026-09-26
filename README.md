@@ -157,12 +157,20 @@ app.get('/openapi.json', (c) => {
 export default app;
 ```
 
-Compile natively with GeaStack:
+### 5. Compile & Verify Natively with GeaStack
 
 ```sh
-npx geatsc-node build src/server.ts
-./dist/server # Native binary listening on http://127.0.0.1:3000
+# 1. Verify GeaStack AOT certification (0 refusals, C++ emitted):
+npm run test:geastack
+
+# 2. Run live HTTP server tests on Hono:
+npm run example:test
+
+# 3. Regenerate routes and OpenAPI from source:
+npm run example:codegen
 ```
+
+> 📘 **Full GeaStack Report:** See [GEASTACK.md](./GEASTACK.md) for detailed compilation benchmarks, Apple Clang C++20 instructions, and `Mach-O 64-bit arm64` native binary generation.
 
 ---
 

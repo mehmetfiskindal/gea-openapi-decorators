@@ -90,14 +90,14 @@ ${routeRegistrations.join('\n')}
     const callExpression = `${awaitKeyword}${controllerVar}.${method.methodName}(${callArgs.join(', ')})`;
 
     const lines: string[] = [
-      `async (c) => {`,
+      `async (c: any) => {`,
       ...paramExtracts,
       `    const result = ${callExpression};`,
-      `    if (result instanceof Response) {`,
+      `    if ((result as any) instanceof (Response as any)) {`,
       `      return result;`,
       `    }`,
       `    if (result === undefined || result === null) {`,
-      `      return c.body(null, ${statusCode === 200 ? 204 : statusCode});`,
+      `      return c.body(null as any, ${statusCode === 200 ? 204 : statusCode});`,
       `    }`,
       `    return c.json(result, ${statusCode});`,
       `  }`,

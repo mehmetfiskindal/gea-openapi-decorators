@@ -40,7 +40,3 @@ export type {
   OpenApiDocument,
   OpenApiSchemaObject,
 } from './types/index.js';
-
-// AST & Code Generator
-export { AstParser } from './cli/parser.js';
-export { CodeGenerator } from './cli/generator.js';

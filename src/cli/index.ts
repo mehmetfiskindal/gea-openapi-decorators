@@ -38,16 +38,28 @@ cli
       return files;
     };
 
+    const resolveInputPatterns = (inputs: string[]): string[] => {
+      const resolved: string[] = [];
+      for (const item of inputs) {
+        if (item.includes('*') && typeof fs.globSync === 'function') {
+          resolved.push(...fs.globSync(item, { cwd }));
+        } else {
+          resolved.push(item);
+        }
+      }
+      return resolved;
+    };
+
     if (options.controllers && options.controllers.length > 0) {
       const cList = Array.isArray(options.controllers) ? options.controllers : [options.controllers];
-      filePaths.push(...cList);
+      filePaths.push(...resolveInputPatterns(cList));
     } else {
       filePaths.push(...scanDir(path.resolve(cwd, 'src'), (name) => name.endsWith('.controller.ts') || name.endsWith('-controller.ts')));
     }
 
     if (options.models && options.models.length > 0) {
       const mList = Array.isArray(options.models) ? options.models : [options.models];
-      filePaths.push(...mList);
+      filePaths.push(...resolveInputPatterns(mList));
     } else {
       filePaths.push(...scanDir(path.resolve(cwd, 'src'), (name) => name.endsWith('.dto.ts') || name.endsWith('.model.ts')));
     }
