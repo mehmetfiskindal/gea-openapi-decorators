@@ -1,0 +1,67 @@
+{
+  "name": "@developersailor/gea-openapi-decorators",
+  "version": "1.0.0",
+  "description": "Ahead-of-Time (AOT) OpenAPI decorators and zero-reflection Hono route generator for GeaStack native C++ compilation",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "gea-openapi": "./bin/cli.js"
+  },
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": [
+    "geastack",
+    "hono",
+    "openapi",
+    "swagger",
+    "decorators",
+    "aot",
+    "c++",
+    "zero-reflection",
+    "codegen"
+  ],
+  "author": "Mehmet Fiskindal <mehmetfiskindal@gmail.com>",
+  "license": "MIT",
+  "dependencies": {
+    "cac": "^6.7.14"
+  },
+  "peerDependencies": {
+    "hono": "^4.0.0",
+    "typescript": "^5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "hono": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "hono": "^4.13.8",
+    "tsup": "^8.0.1",
+    "typescript": "^5.3.3",
+    "vitest": "^4.1.11"
+  }
+}
